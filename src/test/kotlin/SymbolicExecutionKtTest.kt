@@ -6,13 +6,13 @@ class SymbolicExecutionKtTest {
 
     @Test
     fun freeVariablesIncludesFreeVariables() {
-        val freeVars = freeVariables(Block(
+        val freeVars = Block(
             Var("x1"),
             Eq(Var("x2"), Var("x3")),
             If(NEq(Var("x4"), Var("x5")),
                 Plus(Minus(Var("x6"), Var("x7")), Var("x8")),
                 Let(Var("y"), Var("x9"))
-        )))
+        )).freeVariables()
         assertEquals(
             setOf(Var("x1"), Var("x2"), Var("x3"), Var("x4"), Var("x5"), Var("x6"), Var("x7"), Var("x8"), Var("x9")),
             freeVars)
@@ -20,56 +20,59 @@ class SymbolicExecutionKtTest {
 
     @Test
     fun boundVariableNotFree() {
-        val freeVars = freeVariables(Block(
+        val freeVars = Block(
             Let(Var("x"), Var("y")),
-            Var("x")))
+            Var("x")).freeVariables()
         assertFalse(freeVars.contains(Var("x")))
     }
 
     @Test
     fun variableFreeBeforeBound() {
-        val freeVars = freeVariables(Block(
+        val freeVars = Block(
             Var("x"),
-            Let(Var("x"), Var("y"))))
+            Let(Var("x"), Var("y"))).freeVariables()
         assertTrue(freeVars.contains(Var("x")))
     }
 
     @Test
     fun symbolicVarNotFree() {
-        val freeVars = freeVariables(SymVal("x"))
+        val freeVars = SymVal("x").freeVariables()
         assertEquals(emptySet<Var>(), freeVars)
     }
 
     @Test
     fun evaluateSimplifiesConstantOperation() {
-        val result = evaluate(Plus(Const(1), Minus(Mul(Const(2), Const(3)), Const(2))), emptyMap<Var,Expr>().toMutableMap())
+        val result = Plus(Const(1), Minus(Mul(Const(2), Const(3)), Const(2)))
+            .eval(emptyMap<Var,Expr>().toMutableMap())
         assertEquals(Const(5), result)
     }
 
     @Test
     fun evaluateVariable() {
-        val result = evaluate(Var("x"), mutableMapOf(Var("x") to Const(3)))
+        val result = Var("x").eval(mutableMapOf(Var("x") to Const(3)))
         assertEquals(Const(3), result)
     }
 
     @Test
     fun evaluateVariableNotInState() {
         assertThrows(IllegalArgumentException::class.java) {
-            evaluate(Var("x"), mutableMapOf(Var("y") to Const(3)))
+            Var("x").eval(mutableMapOf(Var("y") to Const(3)))
         }
     }
 
     @Test
     fun evaluateLetUpdatesState() {
-        val result = evaluate(Block(
+        val result = Block(
             Let(Var("x"), Const(10)),
-            Var("x")), mutableMapOf(Var("x") to Const(3)))
+            Var("x"))
+            .eval(mutableMapOf(Var("x") to Const(3)))
         assertEquals(Const(10), result)
     }
 
     @Test
     fun evaluateIf() {
-        val result = evaluate(If(Eq(Const(1), Const(2)), Const(3), Const(4)), mutableMapOf())
+        val result = If(Eq(Const(1), Const(2)), Const(3), Const(4))
+            .eval(mutableMapOf())
         assertEquals(Const(4), result)
     }
 
@@ -116,6 +119,28 @@ Next Expression: let x = 1
       π: [Sym(a) == 0]
       Next Expression: (x - y)
 """,
-            astToSymForwardTree(ast).toString())
+            ast.symForwardTree().toString())
+    }
+
+    @Test
+    fun findCounterExampleTest() {
+        val ast = Block(
+            Let(Var("x"), Const(1)),
+            Let(Var("y"), Const(0)),
+            If(
+                NEq(Var("a"), Const(0)),
+                Block(
+                    Let(Var("y"), Plus(Const(3), Var("x"))),
+                    If(
+                        Eq(Var("b"), Const(0)),
+                        Let(Var("x"), Mul(Const(2), Plus(Var("a"), Var("b")))),
+                    )
+                )
+            ),
+            Assert(NEq(Minus(Var("x"), Var("y")), Const(0)))
+        )
+
+        val counterExamples = ast.symForwardTree()!!.findCounterExamples()
+        assertEquals("[a: 2, b: 0]", counterExamples.first().asList().toString())
     }
 }
